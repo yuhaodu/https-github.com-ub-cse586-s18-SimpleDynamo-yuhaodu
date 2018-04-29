@@ -1,5 +1,6 @@
 package edu.buffalo.cse.cse486586.simpledynamo;
 
+import java.io.InputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Formatter;
@@ -8,12 +9,98 @@ import android.content.ContentProvider;
 import android.content.ContentValues;
 import android.database.Cursor;
 import android.net.Uri;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.Serializable;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.SocketAddress;
+import java.net.UnknownHostException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Formatter;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeoutException;
+import android.content.ContentProvider;
+import android.content.ContentValues;
+import android.content.Context;
+import android.database.Cursor;
+import android.database.MatrixCursor;
+import android.net.Uri;
+import android.os.AsyncTask;
+import android.telephony.TelephonyManager;
+import android.util.Log;
+import static android.os.AsyncTask.SERIAL_EXECUTOR;
+
 
 public class SimpleDynamoProvider extends ContentProvider {
+	static final String TAG = SimpleDynamoProvider.class.getSimpleName();
+	static final String REMOTE_PORT0 = "11108";
+	static final String REMOTE_PORT1 = "11112";
+	static final String REMOTE_PORT2 = "11116";
+	static final String REMOTE_PORT3 = "11120";
+	static final String REMOTE_PORT4 = "11124";
+	static final String EMULATER0 = "5554";
+	static final String EMULATER1 = "5556";
+	static final String EMULATER2 = "5558";
+	static final String EMULATER3 = "5560";
+	static final String EMULATER4 = "5562";
+	static final int SERVER_PORT = 10000;
+	private static final String KEY_FIELD = "key";
+	private static final String VALUE_FIELD = "value";
+	private ConcurrentHashMap<String,String> StoredMessage = new ConcurrentHashMap<String,String>();
+	private ArrayList<String> sequence = new ArrayList<String>();
+	private String myPort;
+	private String myEmulator;
+	private String mylocation;
+	private final Uri mUri=buildUri("content", "edu.buffalo.cse.cse486586.simpledynamo.provider");
+	private HashMap<String,String> endPort = new HashMap<String,String>();
+    private Circle circle = new Circle();
+	private manipulateCursor macursor = new manipulateCursor();
+	private manipulateCursor macursor2 = new manipulateCursor();
+	private String successor;
 
 	@Override
 	public int delete(Uri uri, String selection, String[] selectionArgs) {
-		// TODO Auto-generated method stub
+		File dir = getContext().getFilesDir();
+		if(selection.equals("@")){
+			for(String key : StoredMessage.keySet()){
+				File file = new File(dir,key);
+				file.delete();
+			}
+			StoredMessage = new ConcurrentHashMap<String,String>();
+		}
+		else if(selection.equals("*")){
+
+			for(String key : StoredMessage.keySet()){
+				File file = new File(dir,key);
+				file.delete();
+			}
+			StoredMessage = new ConcurrentHashMap<String,String>();
+			Message message = new Message();
+			successor = circle.getSuccess(myPort);
+			message.re_deleteAll(successor,myPort);
+			new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,message);
+		}
+		else{
+			ArrayList<String> writeList = circle.getWriteList(selection);
+			Message message = new Message();
+			message.re_delete(writeList.get(0),myPort,selection);
+			new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,message);
+		}
 		return 0;
 	}
 
@@ -25,23 +112,341 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 	@Override
 	public Uri insert(Uri uri, ContentValues values) {
-		// TODO Auto-generated method stub
-		return null;
+		Set<String> myset = values.keySet();
+		int size = myset.size();
+		String[] settostring = myset.toArray(new String[size]);
+		String keyfile = values.getAsString(settostring[1]);
+		String valuefile = values.getAsString(settostring[0]);
+		String location = getLocation(keyfile);
+		ArrayList<String> writeList = circle.getWriteList(keyfile);
+		Message message = new Message();
+		message.re_InsertMessage(writeList.get(0),keyfile,valuefile);
+		new ClientTask().executeOnExecutor(SERIAL_EXECUTOR, message);
+		Log.v(TAG, "send insert request to" + writeList.get(0) );
+		return uri;
 	}
 
 	@Override
 	public boolean onCreate() {
+		TelephonyManager tel = (TelephonyManager) getContext().getSystemService(Context.TELEPHONY_SERVICE);
+		String portStr = tel.getLine1Number().substring(tel.getLine1Number().length() - 4);
+		myPort = String.valueOf((Integer.parseInt(portStr) * 2));
+		myEmulator = portStr;
+		mylocation = getLocation(myEmulator);
+		createServerTask();
+		String[] portList = circle.getSequence();
+		Message me = new Message();
+		Message me1 = new Message();
+		Message me2 = new Message();
+		Message me3 = new Message();
+		Message me4 = new Message();
+		me.ini_hello(portList[0],myPort);
+		new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,me);
+		me1.ini_hello(portList[1],myPort);
+		new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,me1);
+		me2.ini_hello(portList[2],myPort);
+		new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,me2);
+		me3.ini_hello(portList[3],myPort);
+		new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,me3);
+		me4.ini_hello(portList[4],myPort);
+		new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,me4);
+
+		return true;
+
+
 		// TODO Auto-generated method stub
-		return false;
 	}
 
 	@Override
 	public Cursor query(Uri uri, String[] projection, String selection,
 			String[] selectionArgs, String sortOrder) {
-		// TODO Auto-generated method stub
-		return null;
+		FileInputStream fileInputStream;
+		String value;
+		String[] columnNames = new String[]{"key","value"};
+		MatrixCursor matrixCursor = new MatrixCursor(columnNames);
+		ArrayList<String> writeList = circle.getWriteList(selection);
+		int size = writeList.size();
+		if(selection.equals("@")){
+			try{
+				for(String key : StoredMessage.keySet()){
+					fileInputStream = getContext().openFileInput(key);
+					BufferedReader reader = new BufferedReader(new InputStreamReader(fileInputStream));
+					value = reader.readLine();
+					fileInputStream.close();
+					matrixCursor.addRow(new Object[]{key,value});
+					Log.v("@query",key + ";;" + value );
+				}}catch(IOException e){
+				Log.e(TAG,"query @ has problem");
+			}
+			return matrixCursor;
+		}
+		else if(selection.equals("*")){
+
+			Log.v(TAG,"* QueryAll start ");
+			Message message = new Message();
+			successor = circle.getSuccess(myPort);
+			message.re_QueryALL(successor,myPort,StoredMessage);
+			new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message);
+			synchronized(macursor2){
+				try{
+					while(macursor2.matrixCursor == null){
+						macursor2.wait();
+					}
+					Log.d(TAG,"receive all query");
+					matrixCursor = macursor2.re_Cursor();
+					macursor2.ini_Cursor(null);
+				}catch(InterruptedException e){
+					Log.e("TAG","InterruptedException");
+				}
+			}
+			return matrixCursor;
+		}
+		else{
+			try {
+				fileInputStream = getContext().openFileInput(selection);
+				BufferedReader reader = new BufferedReader(new InputStreamReader(fileInputStream));
+				value = reader.readLine();
+				fileInputStream.close();
+				matrixCursor.addRow(new Object[]{selection,value});
+				Log.v("localquery", selection + ";;" + value);
+			} catch (FileNotFoundException e) {
+				Log.e(TAG, "File not Found");
+				Message message = new Message();
+				message.re_QueryMessage(writeList.get(size-1),selection,myPort);
+				new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,message);
+				synchronized (macursor){
+					try{
+						while(macursor.matrixCursor == null){
+							macursor.wait();
+						}
+						Log.d(TAG,"found in other ContentProvider: " + matrixCursor.toString() );
+						matrixCursor = macursor.re_Cursor();
+						macursor.ini_Cursor(null);
+					}catch(InterruptedException f){
+						Log.e(TAG,"INterrputedException + Query");
+						f.printStackTrace();
+					}
+				}
+			}
+			catch (IOException e){
+				Log.e(TAG,"BufferedReader Wrong");
+			}
+			return matrixCursor;}
+
+		}
+
+	private class ClientTask extends AsyncTask<Message, Void, Void> {
+		protected Void doInBackground(Message... messages) {
+			Message message = messages[0];
+			String sendPort = message.sendPort;
+			try{
+				Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10,0,2,2}),Integer.parseInt(sendPort));
+				Log.d(TAG,"ClientTask: Send +"+message.className + " to " + message.sendPort );
+				ObjectOutputStream output  = new ObjectOutputStream(socket.getOutputStream());
+				output.writeObject(message);
+				output.flush();
+				output.close();
+			}
+			catch(UnknownHostException e){
+				Log.e(TAG,"UnknownHostException");
+			}
+			catch(IOException e){
+				Log.e(TAG,"IOException in ClientTask to "+sendPort+";"+message.className);
+				String name = message.className;
+				broadcastMiss(sendPort,myPort);
+				if(name.equals("re_InsertMessage")){
+					ArrayList<String> writeList = circle.getWriteList(message.key);
+					String next = findNext(writeList,sendPort);
+					if(next.equals("no")){}
+					else{
+						message.ini_sendPort(next);
+						new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message);
+						Log.v(TAG,"Client Task: Send resquest insert"+ message.key+"to:"+next+"After detect failure: "+sendPort);
+
+
+					}
+				}
+				else if(name.equals("re_delete")){
+					ArrayList<String> writeList = circle.getWriteList(message.key);
+					String next = findNext(writeList,sendPort);
+					if(next.equals("no")){}
+					else{
+						message.ini_sendPort(next);
+						new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message);
+						Log.v("Send resquest delete", message.key+"to:"+next+"After detect failure: "+sendPort);
+					}
+				}
+				circle.ini_missPort(sendPort);
+				Log.e(TAG,"ServerTask: MissPort" + sendPort);
+
+
+
+
+				e.printStackTrace();
+			}
+			return null;
+		}
 	}
 
+
+
+	private class ServerTask extends AsyncTask<ServerSocket,String,Void>{
+		protected Void doInBackground(ServerSocket... sockets){
+			ServerSocket serverSocket = sockets[0];
+			while(true) {
+				try {
+					Socket sockets1 = serverSocket.accept();
+					ObjectInputStream input = new ObjectInputStream(sockets1.getInputStream());
+					Message message =(Message)input.readObject();
+					//Log.d(TAG,"ServerTask: RECEIVE+" + message.className + " messageSendPort: " + message.sendPort + " my Port: "+myPort);
+					if(message.className.equals("re_InsertMessage")){
+						String key = message.key;
+						String value = message.value;
+						fileInsert(key,value);
+						ArrayList<String> writeList = circle.getWriteList(key);
+						int location = getSequenceNumber(writeList,myPort);
+						if(writeList.size()-1 == location){
+							Log.v(TAG,"ServerTask: insert"+ value+"at:"+myPort+" end of insert");}
+						else{
+							message.ini_sendPort(writeList.get(location + 1));
+							new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message);
+							Log.v(TAG,"ServerTask: Send resquest insert"+value+"to:"+writeList.get(location + 1));}
+					    }
+					else if(message.className.equals("re_QueryMessage")){
+						String value = "none";
+						for( String key : StoredMessage.keySet()){
+							if(key.equals(message.key)){
+								value  = StoredMessage.get(key);
+								break;
+							}
+						}
+						Message message1 = new Message();
+						message1.reply_QueryMessage(message.selfPort,message.key,value);
+						new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message1);
+						Log.d(TAG,"ServerTask: "+ "Found " + message.key + " send back to " + message.selfPort);
+
+					}
+					else if(message.className.equals("reply_QueryMessage")){
+						synchronized (macursor){
+							Log.d(TAG,"reply query from other  other ContentProvider: " + message.selfPort);
+							String[] columnNames = new String[]{"key","value"};
+							MatrixCursor matrixCursor = new MatrixCursor(columnNames);
+							matrixCursor.addRow(new Object[]{message.key,message.value});
+							macursor.ini_Cursor(matrixCursor);
+							macursor.notify();
+						}
+					}
+					else if(message.className.equals("re_QueryALL")){
+						if(!message.selfPort.equals(myPort)){
+							Log.v("SeverTask received:","re_QueryALL " );
+							ConcurrentHashMap<String, String> all = new ConcurrentHashMap<String,String>();
+							all.putAll(message.map);
+							all.putAll(StoredMessage);
+							message.ini_HashMap(all);
+							message.ini_sendPort(circle.getSuccess(myPort));
+							new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message);
+						}else{
+							synchronized (macursor2){
+								Log.v(TAG,"received query all ");
+								String[] columnNames = new String[]{"key","value"};
+								MatrixCursor matrixCursor = new MatrixCursor(columnNames);
+								ConcurrentHashMap<String,String> map = message.map;
+								for(String key : message.map.keySet()){
+									matrixCursor.addRow(new Object[]{key,map.get(key)});
+								}
+								macursor2.ini_Cursor(matrixCursor);
+								macursor2.notify();
+							}
+						}
+					}
+					else if(message.className.equals("re_deleteAll")){
+						String selfPort = message.selfPort;
+						if(selfPort.equals(myPort)){
+						}
+						else{
+							File dir = getContext().getFilesDir();
+							for(String key : StoredMessage.keySet()){
+								File file = new File(dir,key);
+								file.delete();
+							}
+							StoredMessage = new ConcurrentHashMap<String, String>();
+							message.ini_sendPort(circle.getSuccess(myPort));
+							new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message);
+						}
+					}
+					else if(message.className.equals("re_delete")){
+						String key = message.key;
+						Log.d(TAG,"delete: " + key+ " at " + myPort );
+						StoredMessage.remove(key);
+						ArrayList<String> writeList = circle.getWriteList(key);
+						int location = getSequenceNumber(writeList,myPort);
+						if(writeList.size()-1 == location){
+							Log.v("delete", key+"at:"+myPort+" end of insert");}
+						else{
+							message.ini_sendPort(writeList.get(location + 1));
+							new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message);
+							Log.v("Send resquest delete", key+"to:"+writeList.get(location + 1));}
+
+					}
+					else if(message.className.equals("re_missReport")){
+						String missPort = message.missPort;
+						circle.ini_missPort(missPort);
+						Log.v(TAG,"ServerTask: "+"MissPort:"+missPort);
+					}
+					else if(message.className.equals("ini_hello")){
+						Log.e(TAG,"ServerTask: Receive hello from" + message.selfPort);
+						ConcurrentHashMap<String,String> sendMap = new ConcurrentHashMap<String,String>();
+						String mPort = message.selfPort;
+						String[] three = circle.threeBrother(mPort);
+						for(int i = 0; i < 3; i++){
+							if(myPort.equals(three[0]) || myPort.equals(three[1])){
+								for(String key:StoredMessage.keySet()){
+									if(checkbelongto(key).equals(myPort)){
+										sendMap.put(key,StoredMessage.get(key));
+									}
+								}
+								break;
+							}
+							else if(myPort.equals(three[2])){
+								for(String key:StoredMessage.keySet()){
+									if(checkbelongto(key).equals(mPort)){
+										sendMap.put(key,StoredMessage.get(key));
+									}
+								}
+								break;
+
+							}else{
+
+							}
+						}
+						if(!sendMap.isEmpty()){
+							Message message1 = new Message();
+							message1.re_hello(mPort,sendMap);
+							new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message1);
+							Log.e(TAG,"ServerTask: Send re_hello to" + mPort);
+						}
+						circle.rev_missPort();
+					}
+					else if(message.className.equals("re_hello")){
+						StoredMessage.putAll(message.map);
+						for(String key:message.map.keySet()){
+							fileInsert(key,message.map.get(key));
+						}
+						Log.v(TAG,"SeverTask: re_hello" );
+					}
+
+
+				}catch(IOException e){
+					Log.e(TAG,"ServerTask Exception");
+					e.printStackTrace();
+				}
+				catch(ClassNotFoundException e){
+					Log.e(TAG,"classNotFoundException" );
+					e.printStackTrace();
+				}
+			}
+		}
+	}
 	@Override
 	public int update(Uri uri, ContentValues values, String selection,
 			String[] selectionArgs) {
@@ -58,4 +463,198 @@ public class SimpleDynamoProvider extends ContentProvider {
         }
         return formatter.toString();
     }
+	private class manipulateCursor{
+		MatrixCursor matrixCursor = null;
+		public void ini_Cursor(MatrixCursor cursor){
+			matrixCursor = cursor;
+		}
+		public MatrixCursor re_Cursor(){
+			return matrixCursor;
+		}
+
+	}
+
+	public void ini_Sequence(){
+		sequence.add("11124");
+		sequence.add("11112");
+		sequence.add("11108");
+		sequence.add("11116");
+		sequence.add("11120");
+		endPort.put("11124","11108");
+		endPort.put("11112","11116");
+		endPort.put("11108","11120");
+		endPort.put("11116","11124");
+		endPort.put("11124","11108");
+
+	}
+	public void change_Sequence(String missPort){
+		int len = sequence.size();
+		int index = 10;
+		for(int i =0; i < len ; i++){
+			if(missPort.equals(sequence.get(i))){
+				index = i;
+				break;
+			}
+		}
+		sequence.remove(index);
+	}
+	public void add_Sequence(String onPort){
+		if(onPort.equals("11124")){
+			sequence.add(0,"11124");
+		}
+		else if(onPort.equals("11112")){
+			sequence.add(1,"11112");
+		}
+		else if(onPort.equals("11108")){
+			sequence.add(2,"11108");
+		}
+		else if(onPort.equals("11116")){
+			sequence.add(3,"11116");
+		}
+		else{
+			sequence.add(4,"11116");
+		}
+
+
+	}
+	public String getPortLocation(String port){
+		int portnum = Integer.parseInt(port);
+		String location = getLocation(String.valueOf(portnum/2));
+		return location;
+	}
+	public String getLocation(String input){
+		try{
+			String location = genHash(input);
+			return location;
+		}catch(NoSuchAlgorithmException e){
+			Log.e(TAG,"NoSuchAlgorithmException at getLocation:"+input);
+			return "wrong here";
+		}
+
+	}
+	public void createServerTask(){
+		try{
+
+			ServerSocket serverSocket = new ServerSocket(SERVER_PORT);
+			new ServerTask().executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR,serverSocket);
+		}catch (IOException e){
+			Log.e(TAG,"Can't create a ServerSocket");
+			e.printStackTrace();
+		}
+	}
+	public String ini_Port(String key){
+		if(getLocation(key).compareTo(getPortLocation("11124"))>0 && getLocation(key).compareTo(getPortLocation("11112"))<0){
+			return "11112";
+		}
+		else if(getLocation(key).compareTo(getPortLocation("11112"))>0 && getLocation(key).compareTo(getPortLocation("11108"))<0){
+			return "11108";
+		}
+		else if(getLocation(key).compareTo(getPortLocation("11108"))>0 && getLocation(key).compareTo(getPortLocation("11116"))<0){
+			return "11116";
+		}
+		else if(getLocation(key).compareTo(getPortLocation("11116"))>0 && getLocation(key).compareTo(getPortLocation("11120"))<0){
+			return "11120";
+		}
+		else{
+			return "11124";
+		}
+
+	}
+	private Uri buildUri(String scheme, String authority) {
+		Uri.Builder uriBuilder = new Uri.Builder();
+		uriBuilder.authority(authority);
+		uriBuilder.scheme(scheme);
+		return uriBuilder.build();
+	}
+	public void fileInsert(String keyfile, String valuefile){
+		try {
+			FileOutputStream outputStream = getContext().openFileOutput(keyfile, Context.MODE_PRIVATE);
+			outputStream.write(valuefile.getBytes());
+			outputStream.close();
+			StoredMessage.put(keyfile,valuefile);
+		} catch (Exception e) {
+			Log.e(TAG, "File Output Wrong");
+
+		}
+	}
+	public int getSequenceNumber(ArrayList<String> writeList,String myport) {
+		int size = writeList.size();
+		int output = 9;
+		for (int i = 0; i < size; i++) {
+			if (writeList.get(i).equals(myport)) {
+				output = i;
+				break;
+
+			}
+
+		}
+		return output;
+
+	}
+	public void broadcast(String myport){
+		String[] portList = circle.getSequence();
+		Message message1 = new Message();
+
+		for(String port:portList){
+			if(!port.equals(myport)){
+				message1.ini_hello(port,myport);
+				new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message1);
+				Log.d(TAG,"Oncreate: send ini_hello to "+message1.sendPort);
+			}
+		}
+
+	}
+	public void failureaction(Message message){
+
+
+	}
+	public String findNext(ArrayList<String> writeList, String nowPort){
+		int index = 9;
+		int size = writeList.size();
+		for(int i =0; i < size; i++){
+			if(nowPort.equals(writeList.get(i))){
+				index = i;
+				break;
+			}
+		}
+		if(index == size-1){
+			return "no";
+		}
+		else{
+			return writeList.get(index+1);
+		}
+
+	}
+	public void broadcastMiss(String missPort,String myport){
+		String[] broadList = circle.getSequence();
+		int size = broadList.length;
+		Message message = new Message();
+		message.re_missReport(myport,missPort);
+		for(int i =0; i < size; i++){
+			if(!(myport.equals(broadList[i]) || missPort.equals(broadList[i]))){
+				message.ini_sendPort(broadList[i]);
+				new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message);
+				Log.e(TAG,"ClientTask: broadcastMiss to" + broadList[i] + "for" + message.missPort);
+			}
+		}
+
+	}
+	public String checkbelongto(String key){
+           if(getLocation(key).compareTo(getPortLocation("11124")) < 0 || getLocation(key).compareTo(getPortLocation("11120")) > 0){
+           	  return "11124";
+		   }
+		   else if(getLocation(key).compareTo(getPortLocation("11112")) < 0 && getLocation(key).compareTo(getPortLocation("11124")) > 0){
+           	  return "11112";
+		   }
+		   else if(getLocation(key).compareTo(getPortLocation("11108")) < 0 && getLocation(key).compareTo(getPortLocation("11112")) > 0){
+		   	  return "11108";
+		   }
+		   else if(getLocation(key).compareTo(getPortLocation("11116")) < 0 && getLocation(key).compareTo(getPortLocation("11108")) > 0){
+			   return "11116";
+		   }
+		   else{
+		   	   return "11120";
+		   }
+
+	}
 }
