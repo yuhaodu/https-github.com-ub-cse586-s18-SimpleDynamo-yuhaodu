@@ -54,10 +54,11 @@ public class Message implements Serializable {
         ini_HashMap(map);
         ini_className("fi_location");
     }
-    public void re_InsertMessage(String sendPort,String keyfile, String valuefile){
+    public void re_InsertMessage(String sendPort,String keyfile, String valuefile,String selfPort){
         ini_Key(keyfile);
         ini_Value(valuefile);
         ini_sendPort(sendPort);
+        ini_selfPort(selfPort);
         ini_className("re_InsertMessage");
     }
     public void re_QueryMessage(String sendPort,String keyfile,String selfPort){
@@ -100,15 +101,21 @@ public class Message implements Serializable {
         ini_selfPort(selfPort);
         ini_className("ini_hello");
     }
-    public void re_hello(String sendPort,ConcurrentHashMap<String,String> map){
+    public void re_hello(String sendPort,String selfPort,ConcurrentHashMap<String,String> map){
         ini_className("re_hello");
         ini_sendPort(sendPort);
+        ini_selfPort(selfPort);
         ini_HashMap(map);
     }
-    public void re_missReport(String sendPort,String missPort){
+    public void re_missReport(String sendPort,String selfPort,String missPort){
         ini_sendPort(sendPort);
         ini_missPort(missPort);
+        ini_selfPort(selfPort);
         ini_className("re_missReport");
+    }
+    public void Fin_OK(String sendPort){
+        ini_sendPort(sendPort);
+        ini_className("Fin_OK");
     }
 
 }

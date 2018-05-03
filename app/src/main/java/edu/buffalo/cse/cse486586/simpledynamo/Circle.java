@@ -146,6 +146,109 @@ public class Circle {
 
 
     }
+    public String[] storeseq(String key){
+        String mport = checkbelongto(key);
+        int location = checkS(mport);
+        if(location==0){
+            String[] output = {"11124","11112","11108"};
+            return output;
+        }
+        else if(location == 1){
+            String[] output = {"11112","11108","11116"};
+            return output;
+        }
+        else if(location == 2){
+            String[] output = {"11108","11116","11120"};
+            return output;
+        }
+        else if(location == 3){
+            String[] output = {"11116","11120","11124"};
+            return output;
+        }
+        else{
+            String[] output = {"11120","11124","11112"};
+            return output;
+        }
 
+    }
+    public ArrayList<String> getTrueList(String key){
+        String iniPort = ini_Port(key);
+        int loc = checkS(iniPort);
+        int loc1 = loc + 1;
+        int loc2 = loc + 2;
+        if(loc1 >= 5){
+            loc1 = loc1 - 5;
+        }
+        if(loc2 >= 5){
+            loc2 = loc2 -5;
+        }
+        ArrayList<String> result = new ArrayList<String>();
+        result.add(sequence[loc]);
+        result.add(sequence[loc1]);
+        result.add(sequence[loc2]);
+        return result;}
+    public String checkbelongto(String key){
+        if(getLocation(key).compareTo(getPortLocation("11124")) < 0 || getLocation(key).compareTo(getPortLocation("11120")) > 0){
+            return "11124";
+        }
+        else if(getLocation(key).compareTo(getPortLocation("11112")) < 0 && getLocation(key).compareTo(getPortLocation("11124")) > 0){
+            return "11112";
+        }
+        else if(getLocation(key).compareTo(getPortLocation("11108")) < 0 && getLocation(key).compareTo(getPortLocation("11112")) > 0){
+            return "11108";
+        }
+        else if(getLocation(key).compareTo(getPortLocation("11116")) < 0 && getLocation(key).compareTo(getPortLocation("11108")) > 0){
+            return "11116";
+        }
+        else{
+            return "11120";
+        }
+
+    }
+    public String nextPort(String key,String nowPort){
+        String[] writeList = storeseq(key);
+        int index = 10;
+        for(int i =0; i < 3; i++){
+            if(writeList[i].equals(nowPort)){
+                index = i;
+                break;
+            }
+        }
+        if(index==2){
+            return "no";
+        }else if(index == 1){
+            if(writeList[2] != missPort){
+                return writeList[2];
+            }else{
+                return "no";
+            }
+        }else{
+            if(writeList[1] != missPort){
+                return writeList[1];
+            }else{
+                return writeList[2];
+            }
+        }
+
+
+    }
+    public String firstPort(String key){
+        String[] writeList = storeseq(key);
+        if(writeList[0] == missPort){
+            return writeList[1];
+        }else{
+            return writeList[0];
+        }
+
+
+    }
+    public String lastPort(String key){
+        String[] writeList = storeseq(key);
+        if(writeList[2] != missPort){
+            return writeList[2];
+        }else{
+            return writeList[1];
+        }
+    }
 
  }

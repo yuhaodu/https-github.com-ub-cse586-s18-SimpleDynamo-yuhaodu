@@ -1,6 +1,8 @@
 package edu.buffalo.cse.cse486586.simpledynamo;
 
 import java.io.InputStream;
+import java.io.StreamCorruptedException;
+import java.net.SocketTimeoutException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Formatter;
@@ -118,11 +120,11 @@ public class SimpleDynamoProvider extends ContentProvider {
 		String keyfile = values.getAsString(settostring[1]);
 		String valuefile = values.getAsString(settostring[0]);
 		String location = getLocation(keyfile);
-		ArrayList<String> writeList = circle.getWriteList(keyfile);
+		String firstPort = circle.firstPort(keyfile);
 		Message message = new Message();
-		message.re_InsertMessage(writeList.get(0),keyfile,valuefile);
+		message.re_InsertMessage(firstPort,keyfile,valuefile,myPort);
 		new ClientTask().executeOnExecutor(SERIAL_EXECUTOR, message);
-		Log.v(TAG, "send insert request to" + writeList.get(0) );
+		Log.v(TAG, "Function: Send Insert "+ keyfile +" request to " + firstPort );
 		return uri;
 	}
 
@@ -164,8 +166,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 		String value;
 		String[] columnNames = new String[]{"key","value"};
 		MatrixCursor matrixCursor = new MatrixCursor(columnNames);
-		ArrayList<String> writeList = circle.getWriteList(selection);
-		int size = writeList.size();
+		String queryPort = circle.lastPort(selection);
 		if(selection.equals("@")){
 			try{
 				for(String key : StoredMessage.keySet()){
@@ -212,7 +213,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 			} catch (FileNotFoundException e) {
 				Log.e(TAG, "File not Found");
 				Message message = new Message();
-				message.re_QueryMessage(writeList.get(size-1),selection,myPort);
+				message.re_QueryMessage(queryPort,selection,myPort);
 				new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,message);
 				synchronized (macursor){
 					try{
@@ -240,50 +241,61 @@ public class SimpleDynamoProvider extends ContentProvider {
 			Message message = messages[0];
 			String sendPort = message.sendPort;
 			try{
-				Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10,0,2,2}),Integer.parseInt(sendPort));
+			Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10,0,2,2}),Integer.parseInt(sendPort));
+			try{
 				Log.d(TAG,"ClientTask: Send +"+message.className + " to " + message.sendPort );
 				ObjectOutputStream output  = new ObjectOutputStream(socket.getOutputStream());
 				output.writeObject(message);
 				output.flush();
-				output.close();
 			}
 			catch(UnknownHostException e){
 				Log.e(TAG,"UnknownHostException");
 			}
 			catch(IOException e){
-				Log.e(TAG,"IOException in ClientTask to "+sendPort+";"+message.className);
-				String name = message.className;
-				broadcastMiss(sendPort,myPort);
-				if(name.equals("re_InsertMessage")){
-					ArrayList<String> writeList = circle.getWriteList(message.key);
-					String next = findNext(writeList,sendPort);
-					if(next.equals("no")){}
-					else{
-						message.ini_sendPort(next);
-						new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message);
-						Log.v(TAG,"Client Task: Send resquest insert"+ message.key+"to:"+next+"After detect failure: "+sendPort);
-
-
-					}
-				}
-				else if(name.equals("re_delete")){
-					ArrayList<String> writeList = circle.getWriteList(message.key);
-					String next = findNext(writeList,sendPort);
-					if(next.equals("no")){}
-					else{
-						message.ini_sendPort(next);
-						new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message);
-						Log.v("Send resquest delete", message.key+"to:"+next+"After detect failure: "+sendPort);
-					}
-				}
-				circle.ini_missPort(sendPort);
-				Log.e(TAG,"ServerTask: MissPort" + sendPort);
-
-
-
-
-				e.printStackTrace();
+				Log.e(TAG,"ClientTask: Send IOException");
+				IOExceptionHandle(message,e);
+				return null;
 			}
+			try{
+				if(message.className.equals("re_InsertMessage")){
+					Log.e(TAG,"Wait for OK");
+				    ObjectInputStream input = new ObjectInputStream(socket.getInputStream());
+				    Message message1 =(Message)input.readObject();
+				    if(message1.className.equals("Fin_OK")){
+						Log.d(TAG,"Receive Final Insert");
+					}
+				}
+				else if(message.className.equals("re_QueryMessage")){
+					Log.e(TAG,"Wait for Query");
+					ObjectInputStream input = new ObjectInputStream(socket.getInputStream());
+					Message message1 =(Message)input.readObject();
+					if(message1.className.equals("reply_QueryMessage")){
+						synchronized (macursor){
+							Log.d(TAG,"reply query from other  other ContentProvider: " + message1.selfPort);
+							String[] columnNames = new String[]{"key","value"};
+							MatrixCursor matrixCursor = new MatrixCursor(columnNames);
+							matrixCursor.addRow(new Object[]{message1.key,message1.value});
+							macursor.ini_Cursor(matrixCursor);
+							macursor.notify();
+						}
+					}
+				}
+			}catch(UnknownHostException e){
+				Log.e(TAG,"UnknownHostException");
+			}catch(ClassNotFoundException e){
+				Log.e(TAG,"ClassNotFoundException");
+			} catch(IOException e){
+				Log.e(TAG,"ClientTask: Received IOException");
+				IOExceptionHandle(message,e);
+				return null;
+			}}
+			catch(UnknownHostException e){
+				Log.e(TAG,"UnknownHostException");
+			}
+			catch(IOException e){
+				Log.e(TAG,"IOException");
+			}
+
 			return null;
 		}
 	}
@@ -298,21 +310,30 @@ public class SimpleDynamoProvider extends ContentProvider {
 					Socket sockets1 = serverSocket.accept();
 					ObjectInputStream input = new ObjectInputStream(sockets1.getInputStream());
 					Message message =(Message)input.readObject();
-					//Log.d(TAG,"ServerTask: RECEIVE+" + message.className + " messageSendPort: " + message.sendPort + " my Port: "+myPort);
-					if(message.className.equals("re_InsertMessage")){
+
+					if(message.className.equals("re_InsertMessage")){          //re_InsertMessage
+						Message message2 = new Message();
+						ObjectOutputStream output = new ObjectOutputStream(sockets1.getOutputStream());
+						message2.Fin_OK(message.selfPort);
+						output.writeObject(message2);
+						output.flush();
 						String key = message.key;
 						String value = message.value;
 						fileInsert(key,value);
-						ArrayList<String> writeList = circle.getWriteList(key);
-						int location = getSequenceNumber(writeList,myPort);
-						if(writeList.size()-1 == location){
-							Log.v(TAG,"ServerTask: insert"+ value+"at:"+myPort+" end of insert");}
+						Log.v(TAG,"ServerTask: Insert: " + key + "  " + value);
+						String nextPort = circle.nextPort(message.key,myPort);
+						if(nextPort.equals("no")){
+							Log.v(TAG,"ServerTask: insert "+ key+"at:"+myPort+" end of insert");}
 						else{
-							message.ini_sendPort(writeList.get(location + 1));
+							message.ini_sendPort(nextPort);
+							message.ini_selfPort(myPort);
 							new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message);
-							Log.v(TAG,"ServerTask: Send resquest insert"+value+"to:"+writeList.get(location + 1));}
-					    }
-					else if(message.className.equals("re_QueryMessage")){
+							Log.v(TAG,"ServerTask: Send resquest insert "+key+" to: "+nextPort);}
+
+					}
+
+
+					else if(message.className.equals("re_QueryMessage")){        //re_QueryMessage
 						String value = "none";
 						for( String key : StoredMessage.keySet()){
 							if(key.equals(message.key)){
@@ -322,19 +343,12 @@ public class SimpleDynamoProvider extends ContentProvider {
 						}
 						Message message1 = new Message();
 						message1.reply_QueryMessage(message.selfPort,message.key,value);
-						new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message1);
+						//new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message1);
+						ObjectOutputStream output = new ObjectOutputStream(sockets1.getOutputStream());
+						output.writeObject(message1);
+						output.flush();
 						Log.d(TAG,"ServerTask: "+ "Found " + message.key + " send back to " + message.selfPort);
 
-					}
-					else if(message.className.equals("reply_QueryMessage")){
-						synchronized (macursor){
-							Log.d(TAG,"reply query from other  other ContentProvider: " + message.selfPort);
-							String[] columnNames = new String[]{"key","value"};
-							MatrixCursor matrixCursor = new MatrixCursor(columnNames);
-							matrixCursor.addRow(new Object[]{message.key,message.value});
-							macursor.ini_Cursor(matrixCursor);
-							macursor.notify();
-						}
 					}
 					else if(message.className.equals("re_QueryALL")){
 						if(!message.selfPort.equals(myPort)){
@@ -359,6 +373,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 							}
 						}
 					}
+
 					else if(message.className.equals("re_deleteAll")){
 						String selfPort = message.selfPort;
 						if(selfPort.equals(myPort)){
@@ -374,6 +389,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 							new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message);
 						}
 					}
+
 					else if(message.className.equals("re_delete")){
 						String key = message.key;
 						Log.d(TAG,"delete: " + key+ " at " + myPort );
@@ -388,11 +404,6 @@ public class SimpleDynamoProvider extends ContentProvider {
 							Log.v("Send resquest delete", key+"to:"+writeList.get(location + 1));}
 
 					}
-					else if(message.className.equals("re_missReport")){
-						String missPort = message.missPort;
-						circle.ini_missPort(missPort);
-						Log.v(TAG,"ServerTask: "+"MissPort:"+missPort);
-					}
 					else if(message.className.equals("ini_hello")){
 						Log.e(TAG,"ServerTask: Receive hello from" + message.selfPort);
 						ConcurrentHashMap<String,String> sendMap = new ConcurrentHashMap<String,String>();
@@ -403,6 +414,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 								for(String key:StoredMessage.keySet()){
 									if(checkbelongto(key).equals(myPort)){
 										sendMap.put(key,StoredMessage.get(key));
+
 									}
 								}
 								break;
@@ -421,18 +433,19 @@ public class SimpleDynamoProvider extends ContentProvider {
 						}
 						if(!sendMap.isEmpty()){
 							Message message1 = new Message();
-							message1.re_hello(mPort,sendMap);
+							message1.re_hello(mPort,myPort,sendMap);
 							new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message1);
-							Log.e(TAG,"ServerTask: Send re_hello to" + mPort);
+							Log.e(TAG,"ServerTask: Send re_hello to" + mPort );
 						}
 						circle.rev_missPort();
 					}
+
 					else if(message.className.equals("re_hello")){
-						StoredMessage.putAll(message.map);
+						//StoredMessage.putAll(message.map);
 						for(String key:message.map.keySet()){
 							fileInsert(key,message.map.get(key));
 						}
-						Log.v(TAG,"SeverTask: re_hello" );
+						Log.v(TAG,"SeverTask: re_hello from: " + message.selfPort );
 					}
 
 
@@ -444,6 +457,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 					Log.e(TAG,"classNotFoundException" );
 					e.printStackTrace();
 				}
+
 			}
 		}
 	}
@@ -591,23 +605,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 		return output;
 
 	}
-	public void broadcast(String myport){
-		String[] portList = circle.getSequence();
-		Message message1 = new Message();
 
-		for(String port:portList){
-			if(!port.equals(myport)){
-				message1.ini_hello(port,myport);
-				new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message1);
-				Log.d(TAG,"Oncreate: send ini_hello to "+message1.sendPort);
-			}
-		}
-
-	}
-	public void failureaction(Message message){
-
-
-	}
 	public String findNext(ArrayList<String> writeList, String nowPort){
 		int index = 9;
 		int size = writeList.size();
@@ -625,20 +623,65 @@ public class SimpleDynamoProvider extends ContentProvider {
 		}
 
 	}
-	public void broadcastMiss(String missPort,String myport){
-		String[] broadList = circle.getSequence();
-		int size = broadList.length;
-		Message message = new Message();
-		message.re_missReport(myport,missPort);
-		for(int i =0; i < size; i++){
-			if(!(myport.equals(broadList[i]) || missPort.equals(broadList[i]))){
-				message.ini_sendPort(broadList[i]);
+	public void StreamExceptionHandle(Message message,Exception e){
+		String sendPort = message.sendPort;
+		Log.e(TAG,"StreamCorruptedException in ClientTask to "+sendPort+" ; "+message.className);
+		String name = message.className;
+		if(name.equals("re_InsertMessage")){
+			ArrayList<String> trueList = circle.getTrueList(message.key);
+			String next = findNext(trueList,sendPort);
+			if(next.equals("no")){}
+			else{
+				message.ini_sendPort(next);
 				new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message);
-				Log.e(TAG,"ClientTask: broadcastMiss to" + broadList[i] + "for" + message.missPort);
+				Log.v(TAG,"Client Task: Send resquest insert"+ message.key+"to:"+next+"After detect failure: "+sendPort);
+
+
 			}
 		}
-
+		else if(name.equals("re_delete")){
+			ArrayList<String> writeList = circle.getWriteList(message.key);
+			String next = findNext(writeList,sendPort);
+			if(next.equals("no")){}
+			else{
+				message.ini_sendPort(next);
+				new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message);
+				Log.v("Send resquest delete", message.key+"to:"+next+"After detect failure: "+sendPort);
+			}
+		}
+		circle.ini_missPort(sendPort);
+		Log.e(TAG,"Missport-InI: " + sendPort);
+		e.printStackTrace();
 	}
+	public void IOExceptionHandle(Message message,Exception e){
+		String sendPort = message.sendPort;
+		circle.ini_missPort(sendPort);
+		Log.e(TAG,"Missport-InI: " + sendPort);
+		Log.e(TAG,"IOException in ClientTask to "+sendPort+" ; "+message.className);
+		String name = message.className;
+		if(name.equals("re_InsertMessage")){
+			String next = circle.nextPort(message.key,sendPort);
+			if(next.equals("no")){}
+			else{
+				message.ini_sendPort(next);
+				message.ini_selfPort(myPort);
+				new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message);
+				Log.v(TAG,"Client Task: Send resquest insert"+ message.key+"to:"+next+"After detect failure: "+sendPort);
+			}
+		}
+		else if(name.equals("re_delete")){
+			ArrayList<String> writeList = circle.getWriteList(message.key);
+			String next = findNext(writeList,sendPort);
+			if(next.equals("no")){}
+			else{
+				message.ini_sendPort(next);
+				new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message);
+				Log.v("Send resquest delete", message.key+"to:"+next+"After detect failure: "+sendPort);
+			}
+		}
+		e.printStackTrace();
+	}
+
 	public String checkbelongto(String key){
            if(getLocation(key).compareTo(getPortLocation("11124")) < 0 || getLocation(key).compareTo(getPortLocation("11120")) > 0){
            	  return "11124";
