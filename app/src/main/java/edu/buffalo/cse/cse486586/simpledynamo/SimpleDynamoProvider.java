@@ -74,6 +74,8 @@ public class SimpleDynamoProvider extends ContentProvider {
 	private manipulateCursor macursor = new manipulateCursor();
 	private manipulateCursor macursor2 = new manipulateCursor();
 	private String successor;
+	private int count = 0;
+	private int t = 0;
 
 	@Override
 	public int delete(Uri uri, String selection, String[] selectionArgs) {
@@ -435,6 +437,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 					}
 					else if(message.className.equals("ini_hello")){
 						Log.e(TAG,"ServerTask: Receive hello from" + message.selfPort);
+						circle.rev_missPort();
 						ConcurrentHashMap<String,String> sendMap = new ConcurrentHashMap<String,String>();
 						String mPort = message.selfPort;
 						String[] three = circle.threeBrother(mPort);
@@ -465,8 +468,12 @@ public class SimpleDynamoProvider extends ContentProvider {
 							message1.re_hello(mPort,myPort,sendMap);
 							new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message1);
 							Log.e(TAG,"ServerTask: Send re_hello to" + mPort );
+						}else{
+							Message message1 = new Message();
+							message1.re_hello(mPort,myPort,sendMap);
+							new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message1);
+							Log.e(TAG,"ServerTask: Send re_hello to" + mPort );
 						}
-						circle.rev_missPort();
 					}
 
 					else if(message.className.equals("re_hello")){
@@ -475,6 +482,20 @@ public class SimpleDynamoProvider extends ContentProvider {
 							fileInsert(key,message.map.get(key));
 						}
 						Log.v(TAG,"SeverTask: re_hello from: " + message.selfPort );
+						count = count + 1;
+						if(count == 5){
+							String[] portList = circle.threeBrother(myPort);
+							Message mee = new Message();
+							Message mee1 = new Message();
+							Message mee2 = new Message();
+							mee.ini_hello(portList[0],myPort);
+							new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,mee);
+							mee1.ini_hello(portList[1],myPort);
+							new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,mee1);
+							mee2.ini_hello(portList[2],myPort);
+							new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,mee2);
+							count = 0;
+						}
 					}
 
 
