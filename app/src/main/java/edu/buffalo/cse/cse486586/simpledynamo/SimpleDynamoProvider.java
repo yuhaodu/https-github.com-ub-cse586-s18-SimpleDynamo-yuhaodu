@@ -138,12 +138,11 @@ public class SimpleDynamoProvider extends ContentProvider {
 		myEmulator = portStr;
 		mylocation = getLocation(myEmulator);
 		createServerTask();
-		String[] portList = circle.getSequence();
+		String[] portList = circle.fourBrother(myPort);
 		Message me = new Message();
 		Message me1 = new Message();
 		Message me2 = new Message();
 		Message me3 = new Message();
-		Message me4 = new Message();
 		me.ini_hello(portList[0],myPort);
 		new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,me);
 		me1.ini_hello(portList[1],myPort);
@@ -152,8 +151,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 		new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,me2);
 		me3.ini_hello(portList[3],myPort);
 		new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,me3);
-		me4.ini_hello(portList[4],myPort);
-		new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,me4);
+
 
 		return true;
 
@@ -168,7 +166,6 @@ public class SimpleDynamoProvider extends ContentProvider {
 		String value;
 		String[] columnNames = new String[]{"key","value"};
 		MatrixCursor matrixCursor = new MatrixCursor(columnNames);
-		String queryPort = circle.lastPort(selection);
 		if(selection.equals("@")){
 			try{
 				for(String key : StoredMessage.keySet()){
@@ -205,36 +202,32 @@ public class SimpleDynamoProvider extends ContentProvider {
 			return matrixCursor;
 		}
 		else{
-			try {
+			/*try {
 				fileInputStream = getContext().openFileInput(selection);
 				BufferedReader reader = new BufferedReader(new InputStreamReader(fileInputStream));
 				value = reader.readLine();
 				fileInputStream.close();
 				matrixCursor.addRow(new Object[]{selection,value});
 				Log.v("localquery", selection + ";;" + value);
-			} catch (FileNotFoundException e) {
-				Log.e(TAG, "File not Found");
-				Message message = new Message();
-				message.re_QueryMessage(queryPort,selection,myPort);
-				Log.v(TAG,"Function: send query: "+message.key+" to "+ queryPort );
-				new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,message);
-				synchronized (macursor){
-					try{
+			} catch (FileNotFoundException e) {*/
+			String queryPort = circle.lastPort(selection);
+			Message message = new Message();
+			message.re_QueryMessage(queryPort,selection,myPort);
+			Log.v(TAG,"Function: send query: "+message.key+" to "+ queryPort );
+			new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR,message);
+			synchronized (macursor){
+				try{
 						while(macursor.matrixCursor == null){
 							macursor.wait();
 						}
 						Log.d(TAG,"found in other ContentProvider: " + matrixCursor.toString() );
 						matrixCursor = macursor.re_Cursor();
 						macursor.ini_Cursor(null);
-					}catch(InterruptedException f){
+				}catch(InterruptedException f){
 						Log.e(TAG,"INterrputedException + Query");
 						f.printStackTrace();
 					}
 				}
-			}
-			catch (IOException e){
-				Log.e(TAG,"BufferedReader Wrong");
-			}
 			return matrixCursor;}
 
 		}
@@ -274,9 +267,9 @@ public class SimpleDynamoProvider extends ContentProvider {
 					ObjectInputStream input = new ObjectInputStream(socket.getInputStream());
 					Message message1 =(Message)input.readObject();
 					if(message1.className.equals("reply_QueryMessage")){
-						if(message1.value.equals("none")){
+						if(message1.value.equals("none") || message1.value==null){
 							try {
-								Thread.sleep(200);
+								Thread.sleep(400);
 								Log.e(TAG,"Wait 200ms for " + message1.key);
 							} catch (InterruptedException e) {
 								e.printStackTrace();
@@ -337,11 +330,6 @@ public class SimpleDynamoProvider extends ContentProvider {
 					Message message =(Message)input.readObject();
 
 					if(message.className.equals("re_InsertMessage")){          //re_InsertMessage
-						Message message2 = new Message();
-						ObjectOutputStream output = new ObjectOutputStream(sockets1.getOutputStream());
-						message2.Fin_OK(message.selfPort);
-						output.writeObject(message2);
-						output.flush();
 						String key = message.key;
 						String value = message.value;
 						fileInsert(key,value);
@@ -354,6 +342,11 @@ public class SimpleDynamoProvider extends ContentProvider {
 							message.ini_selfPort(myPort);
 							new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,message);
 							Log.v(TAG,"ServerTask: Send resquest insert "+key+" to: "+nextPort);}
+						Message message2 = new Message();
+						ObjectOutputStream output = new ObjectOutputStream(sockets1.getOutputStream());
+						message2.Fin_OK(message.selfPort);
+						output.writeObject(message2);
+						output.flush();
 
 					}      /// Insert Message
 
@@ -440,9 +433,9 @@ public class SimpleDynamoProvider extends ContentProvider {
 						circle.rev_missPort();
 						ConcurrentHashMap<String,String> sendMap = new ConcurrentHashMap<String,String>();
 						String mPort = message.selfPort;
-						String[] three = circle.threeBrother(mPort);
+						String[] four = circle.fourBrother(mPort);
 						for(int i = 0; i < 3; i++){
-							if(myPort.equals(three[0]) || myPort.equals(three[1])){
+							if(myPort.equals(four[0]) || myPort.equals(four[1])){
 								for(String key:StoredMessage.keySet()){
 									if(checkbelongto(key).equals(myPort)){
 										sendMap.put(key,StoredMessage.get(key));
@@ -451,7 +444,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 								}
 								break;
 							}
-							else if(myPort.equals(three[2])){
+							else if(myPort.equals(four[2]) || myPort.equals(four[3])){
 								for(String key:StoredMessage.keySet()){
 									if(checkbelongto(key).equals(mPort)){
 										sendMap.put(key,StoredMessage.get(key));
@@ -478,23 +471,29 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 					else if(message.className.equals("re_hello")){
 						//StoredMessage.putAll(message.map);
-						for(String key:message.map.keySet()){
-							fileInsert(key,message.map.get(key));
+						Map<String,String> map = message.map;
+						for(String key:map.keySet()){
+							fileInsert(key,map.get(key));
+							Log.d(TAG,"ServerTask: received key from "+message.selfPort + " For " + key + " value is " + map.get(key));
 						}
 						Log.v(TAG,"SeverTask: re_hello from: " + message.selfPort );
 						count = count + 1;
-						if(count == 5){
-							String[] portList = circle.threeBrother(myPort);
+						if(count == 4 && t == 0){
+							String[] portList = circle.fourBrother(myPort);
 							Message mee = new Message();
 							Message mee1 = new Message();
 							Message mee2 = new Message();
+							Message mee3 = new Message();
 							mee.ini_hello(portList[0],myPort);
 							new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,mee);
 							mee1.ini_hello(portList[1],myPort);
 							new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,mee1);
 							mee2.ini_hello(portList[2],myPort);
 							new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,mee2);
+							mee3.ini_hello(portList[3],myPort);
+							new ClientTask().executeOnExecutor(SERIAL_EXECUTOR,mee3);
 							count = 0;
+							t = t+1;
 						}
 					}
 

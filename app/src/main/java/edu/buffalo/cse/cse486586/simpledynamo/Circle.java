@@ -121,26 +121,26 @@ public class Circle {
         return sequence;
     }
     public String getMissport(){ return missPort;}
-    public String[] threeBrother(String myPort){
+    public String[] fourBrother(String myPort){
         int location = checkS(myPort);
         if(location==0){
-            String[] output = {"11116","11120","11112"};
+            String[] output = {"11116","11120","11112","11108"};
             return output;
         }
         else if(location == 1){
-            String[] output = {"11120","11124","11108"};
+            String[] output = {"11120","11124","11108","11116"};
             return output;
         }
         else if(location == 2){
-            String[] output = {"11124","11112","11116"};
+            String[] output = {"11124","11112","11116","11120"};
             return output;
         }
         else if(location == 3){
-            String[] output = {"11112","11108","11120"};
+            String[] output = {"11112","11108","11120","11124"};
             return output;
         }
         else{
-            String[] output = {"11108","11116","11124"};
+            String[] output = {"11108","11116","11124","11112"};
             return output;
         }
 
